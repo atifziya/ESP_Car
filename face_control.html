@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ZainZya Face Car Control</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+
+    <style>
+        body { margin: 0; background: #1a1a1a; color: white; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; }
+        #container { position: relative; width: 640px; height: 480px; margin-top: 20px; border: 4px solid #00ffcc; border-radius: 10px; overflow: hidden; }
+        video, canvas { position: absolute; top: 0; left: 0; transform: scaleX(-1); }
+        #status { margin-top: 20px; font-size: 24px; font-weight: bold; color: #00ffcc; }
+        .info { margin-top: 10px; font-size: 14px; color: #aaa; }
+    </style>
+</head>
+<body>
+
+    <h2>ZainZya AI Car Control 😎</h2>
+    <div id="container">
+        <video id="input_video" width="640px" height="480px"></video>
+        <canvas id="output_canvas" width="640px" height="480px"></canvas>
+    </div>
+    <div id="status">COMMAND: STOP</div>
+    <div class="info">Move your nose to control the car (Left/Right/Up/Down)</div>
+
+<script>
+    // --- 1. FIREBASE CONFIGURATION ---
+    const firebaseConfig = {
+        databaseURL: "https://espcar-b7278-default-rtdb.firebaseio.com"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const database = firebase.database();
+
+    const videoElement = document.getElementById('input_video');
+    const canvasElement = document.getElementById('output_canvas');
+    const canvasCtx = canvasElement.getContext('2d');
+    const statusDiv = document.getElementById('status');
+
+    let lastCommand = "S";
+
+    function sendToFirebase(command) {
+        if (command !== lastCommand) {
+            database.ref('/').update({ car_command: command });
+            lastCommand = command;
+            statusDiv.innerText = "COMMAND: " + (command === "S" ? "STOP" : command);
+        }
+    }
+
+    function onResults(results) {
+        canvasCtx.save();
+        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+        if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+            const landmarks = results.multiFaceLandmarks[0];
+            
+            // Nose tip is landmark 1
+            const nose = landmarks[1];
+            let currentCommand = "S";
+
+            // Control Logic (Same as your Python code)
+            if (nose.x > 0.6) currentCommand = "L"; // Flipped because of mirror
+            else if (nose.x < 0.4) currentCommand = "R";
+            else if (nose.y < 0.4) currentCommand = "F";
+            else if (nose.y > 0.6) currentCommand = "B";
+            else currentCommand = "S";
+
+            sendToFirebase(currentCommand);
+
+            // Draw Face Mesh
+            drawConnectors(canvasCtx, landmarks, FACEMESH_TESSELATION, {color: '#00FFCC77', lineWidth: 1});
+            
+            // Draw Nose Point
+            canvasCtx.beginPath();
+            canvasCtx.arc(nose.x * canvasElement.width, nose.y * canvasElement.height, 8, 0, 2 * Math.PI);
+            canvasCtx.fillStyle = "red";
+            canvasCtx.fill();
+        } else {
+            sendToFirebase("S");
+        }
+        canvasCtx.restore();
+    }
+
+    const faceMesh = new FaceMesh({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`});
+    faceMesh.setOptions({ maxNumFaces: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+    faceMesh.onResults(onResults);
+
+    const camera = new Camera(videoElement, {
+        onFrame: async () => { await faceMesh.send({image: videoElement}); },
+        width: 640,
+        height: 480
+    });
+    camera.start();
+</script>
+</body>
+</html>
